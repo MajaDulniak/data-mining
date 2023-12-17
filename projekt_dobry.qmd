@@ -1,0 +1,422 @@
+---
+title: "projekt"
+format:
+  html:
+    theme: default
+    toc: true
+    number-sections: true
+---
+
+```{r,massage=F,warning=F}
+library(tidyverse)
+library(rattle)
+library(caret)
+library(mice)
+library(purrr)
+library(tidymodels)
+library(rpart)
+library(rpart.plot)
+library(ggplot2)
+```
+
+# Temat i cel projektu
+
+## *Analiza i przewidywanie ataku serca*
+
+![](heartanalysis.jpg){width="669"}
+
+**Celem projektu** jest zbudowanie optymalnego modelu klasyfikacyjnego (klasyfikacja binarna), który na podstawie danych pacjenta będzie w stanie przewidzieć ryzyko wystąpienia ataku serca. Analiza ataku serca pozwala na ustalenie i potwierdzenie diagnozy. Poprzez badanie objawów, wyników testów laboratoryjnych oraz obrazowych (np. elektrokardiogram - EKG), lekarze mogą dokonać trafnej diagnozy ataku serca. Jest to istotne dla dalszego leczenia i planowania opieki medycznej.
+
+# Zbiór danych i opis zmiennych
+
+Zbiór danych pochodzi z 2021r. ,zawiera 14 zmiennych oraz 303 obserwacje.
+
+`age` - wiek pacjenta,
+
+`sex` - płeć pacjenta (1-mężczyzna, 0-kobieta),
+
+`cp` - typ bólu w klatce piersiowej (0-typowy (wywołany atakiem kaszlu), 1-nietypowy, 2-niepowiązany z kaszlem, 3-bezobjawowy,
+
+`trtbps` - spoczynkowe ciśnienie krwi (w mm Hg),
+
+`chol` - cholesterol w mg/dl pobrany przez czujnik BMI,
+
+`fbs` - cukier we krwi na czczo \> 120 mg/dl (1-tak, 0-nie),
+
+`restecg` - spoczynkowy wynik elektrokardiograficzny (0 = prawidłowy, 1 = posiadanie nieprawidłowości w układzie ST-T (uniesienie lub obniżenie odcinka ST), 2 = przerost lewej komory serca),
+
+`thalach` - osiągnięte maksymalne tętno,
+
+`exng` - dusznica bolesna (1-tak, 0-nie),
+
+`oldpeak` - stosunek depresji ST wywołana przez wysiłek fizyczny do spoczynku,
+
+`slp` - ocena skosu odcinka ST na elektrokardiogramie EKG,
+
+`caa` - liczba tętnic wieńcowych serca,
+
+`thall` - wynik testu na stres Thalium (0-bardzo niski poziom stresu, 1-normalny/przeciętny poziom, 2-ponadprzeciętnie zestresowany, 3-często wysoki poziom stresu),
+
+`output` -prawdopodobieństwo/ryzyko wystąpienia ataku serca (0- niska szansa na atak serca, 1-wysoka szansa na atak serca)
+
+```{r}
+heart <- read.csv("C:/Users/Dell/Desktop/3 rok/VI SEMESTR/eksploracja/heart.csv")
+heart$output <- factor(heart$output)
+heart$sex <- factor(heart$sex)
+heart$cp <- factor(heart$cp)
+heart$fbs <- factor(heart$fbs)
+heart$restecg <- factor(heart$restecg)
+heart$exng <- factor(heart$exng)
+heart$slp <- factor(heart$slp)
+heart$caa <- factor(heart$caa)
+heart$thall <- factor(heart$thall)
+
+#sprawdzenie braków danych
+sum(is.na(heart))
+```
+
+```{r}
+#podział na zbiór uczący i testowy
+set.seed(2023)
+indeks <- createDataPartition(y=heart$output, p = 0.7, list = FALSE)
+dt_ucz <- heart[indeks,]
+dt_test <- heart[-indeks,]
+levels(dt_ucz$output)[1] <- "low"
+levels(dt_ucz$output)[2] <- "high"
+levels(dt_test$output)[1] <- "low"
+levels(dt_test$output)[2] <- "high"
+head(dt_ucz)
+head(dt_test)
+
+```
+
+Za kontrolę uczenia maszynowego w modelach będzie odpowiadać 5-krotna walidacja krzyżowa 5-krotnie powtórzona.
+
+```{r}
+control <- trainControl(method = "repeatedcv",number = 5, repeats = 5,
+                          summaryFunction=twoClassSummary,
+                          classProbs = TRUE)
+```
+
+```{r}
+nzv(dt_ucz)
+
+glimpse(dt_ucz)
+
+dt_ucz %>% 
+  select(where(is.numeric)) %>% 
+  cor() %>% 
+  corrplot::corrplot(.)
+
+dt_ucz %>% 
+  select(where(is.numeric)) %>% 
+  cor() %>% 
+  findCorrelation()
+
+# findLinearCombos(dt_ucz[,-1])
+
+sum(is.na(dt_ucz))
+```
+
+## Budowa modeli klasyfikacyjnych
+
+### Model regresji logistycznej
+
+```{r}
+mod.log<- train(output~., 
+                data=dt_ucz,
+                method = "glm",
+                trControl = control,
+                metric = "ROC")
+mod.log
+
+pred.log <- predict(mod.log, newdata = dt_test,type="prob")
+pred.log.class <- predict(mod.log, newdata = dt_test)
+
+
+confusionMatrix(pred.log.class, dt_test$output)
+confusionMatrix(pred.log.class, dt_test$output,positive="high")
+
+tab <- table(pred.log.class, dt_test$output)
+tab
+```
+
+Ze zbudowanego modelu wynika ....
+
+### Drzewo klasyfikacyjne
+
+```{r}
+drzewo <- train(output~., data=dt_ucz, method="rpart", trControl=control)
+drzewo
+```
+
+```{r}
+#aby ocenic jakie sa zdolnosci generalizacyjne modelu,sprawdzamy macierz klasyfikacji
+pred.drzewo<-predict(drzewo, newdata=dt_test, type="prob")
+pred.drzewo
+```
+
+#### Drzewo klasyfikacyjne funkcją `rpart`
+
+```{r}
+drzewo.rpart<-rpart(output~., data=dt_ucz)
+drzewo.rpart
+summary(drzewo.rpart)
+```
+
+```{r}
+rpart.plot(drzewo.rpart)
+```
+
+```{r}
+#nie działa
+#tab_drzewo.rpart<-table(predykcja=pred.drzewo.rpart, obserwacja=dt_test$output)
+#tab_drzewo.rpart
+```
+
+```{r}
+#sprawdzamy czy nie jest konieczne przyciecie naszego drzewa
+printcp(drzewo.rpart)
+```
+
+```{r}
+plotcp(drzewo.rpart)
+```
+
+```{r}
+#przyciete drzewo
+drzewo.p<-prune(drzewo.rpart, cp = 0.041237 )
+summary(drzewo.p)
+rpart.plot(drzewo.p)
+```
+
+### Las losowy
+
+```{r}
+
+mod.rf <- train(output~., data=dt_ucz,method="rpart",trControl=control)
+mod.rf
+
+pred.rf<-predict(mod.rf, dt_test, type="prob")
+pred.rf.class<-predict(mod.rf, dt_test)
+
+x<-confusionMatrix(pred.rf.class, dt_test$output, positive="high")
+x
+```
+
+```{r}
+
+
+
+#cm <- pred |> conf_mat(truth = output, estimate = pred) 
+
+#summary(cm)
+
+```
+
+### Model k-NN
+
+```{r}
+grid<-expand.grid(k=2:30)
+
+mod.knn<- train(output~.,
+                data=dt_ucz,
+                method="knn",
+                trControl=control,
+                tuneGrid=grid,
+                metric="ROC")
+mod.knn
+```
+
+```{r}
+pred.knn<-predict(mod.knn, newdata=dt_test, type="prob")
+pred.knn.class<-predict(mod.knn, newdata=dt_test)
+
+confusionMatrix(pred.knn.class, dt_test$output, positive="high")
+#najsłabszy model dotychczas
+```
+
+### Model LDA
+
+```{r}
+mod.lda<-train(output~.,
+               data=dt_ucz,
+               method="lda",
+               trControl=control,
+               metric="ROC")
+mod.lda
+
+pred.lda<-predict(mod.lda, newdata=dt_test, type="prob")
+pred.lda.class<-predict(mod.lda, newdata=dt_test)
+
+confusionMatrix(pred.lda.class, dt_test$output, positive="high")
+```
+
+### Model QDA
+
+```{r}
+mod.qda<-train(output~.,
+               data=dt_ucz,
+               method="stepQDA",
+               trControl=control,
+               metric="ROC")
+#mod.qda
+
+pred.qda<-predict(mod.qda, newdata=dt_test, type="prob")
+pred.qda.class<-predict(mod.qda, newdata=dt_test)
+
+confusionMatrix(pred.qda.class, dt_test$output, positive="high")
+```
+
+### Model MDA
+
+```{r}
+grid<-expand.grid(subclasses=2:5)
+
+mod.mda<-train(output~.,
+               data=dt_ucz,
+               method="mda",
+               trControl=control,
+               tuneGrid=grid,
+               metric="ROC")
+mod.mda
+
+pred.mda<-predict(mod.mda, newdata=dt_test, type="prob")
+pred.mda.class<-predict(mod.mda, newdata=dt_test)
+
+confusionMatrix(pred.mda.class, dt_test$output, positive="high")
+
+```
+
+### Model GBM
+
+```{r}
+grid<-expand.grid(n.trees=c(100,500,1000),
+                  interaction.depth=1:3,
+                  shrinkage=0.1,
+                  n.minobsinnode=10)
+
+mod.gbm<-train(output~.,
+              data=dt_ucz,
+              method="gbm",
+              trControl=control,
+              tuneGrid=grid,
+              metric="ROC")
+#mod.gbm
+
+pred.gbm<-predict(mod.gbm, newdata=dt_test, type="prob")
+pred.gbm.class<-predict(mod.gbm, newdata=dt_test)
+
+confusionMatrix(pred.gbm.class, dt_test$output, positive="high")
+```
+
+### Model Naiwny Klasyfikator Bayesa
+
+```{r}
+mod.nb<- train(output~., data=dt_ucz, method="nb", trControl=control)
+
+pred.nb <- predict(mod.nb, newdata = dt_test,type="prob")
+pred.nb.class <- predict(mod.nb, newdata = dt_test)
+
+
+confusionMatrix(pred.nb.class, dt_test$output)
+x<-confusionMatrix(pred.nb.class, dt_test$output,positive="high")
+x
+
+```
+
+# 
+
+```{r}
+
+```
+
+## Wykresy
+
+-   Rozkład grupy wiekowej w zależności od płci
+
+```{r}
+heart2 <- heart %>%
+  mutate(grupa_wiekowa = cut(age, breaks = c(0, 41, 51, 61, Inf), labels = c(1, 2, 3, 4), right = FALSE))
+
+
+ggplot(heart2, aes(x = factor(grupa_wiekowa), fill = sex)) +
+  geom_bar(position = "dodge", color = "black", aes(stat = "count")) +
+  geom_text(aes(label = ..count..), stat = "count", position = position_dodge(width = 0.9), 
+            vjust = 0.5) +
+  scale_fill_manual(values = c("pink","lightblue")) +
+  labs(x = "Grupa wiekowa", y = "Liczba osób", fill = "Płeć") +
+  theme_classic()
+```
+
+Pozioma oś X przedstawia grupę wiekową, natomiast oś Y reprezentuje liczbę osób z odpowiadającymi im kolorami z legendy, które oznaczają następująco: różowy = 0 dla kobiet, niebieski = 1 dla mężczyzn.
+
+Możemy zauważyć, że w \[??trzeciej grupie wiekowej???\] występuje największy udział mężczyzn, ich liczba wynosi 94. Kobiet również najwięcej znajduje się w tej grupie, natomiast tylko o jedną mniej mamy w grupie czwartej.
+
+-   Rozkład ilości chorych osób
+
+    ```{r}
+    ggplot(heart, aes(x=output, fill=output )) + 
+      xlab("Atak serca")+
+      ylab("Liczba zachorowań")+
+          geom_bar(width=0.5 , fill="blue") 
+    ```
+
+## Porównanie modeli na zbiorze uczącym
+
+```{r}
+results<-resamples(list(MDA=mod.mda,NB=mod.nb, KNN=mod.knn,RF=mod.rf,RF=mod.rf, LDA=mod.lda, QDA=mod.qda, GBM=mod.gbm))
+summary(results)
+```
+
+```{r}
+bwplot(results)
+```
+
+```{r}
+dotplot(results)
+```
+
+```{r}
+roznice<-diff(results)
+roznice
+summary(roznice)
+dotplot(roznice)
+```
+
+Aby sprawdzić, ktory model dokonał najlepszej predykcji na zbiorze testowym, narysujemy wykres zawierający wszystkie krzywe ROC tych modeli:
+
+```{r}
+library(ROCR)
+
+test1<-prediction(pred.drzewo[,2], dt_test$output)
+test2<-prediction(pred.nb[,2], dt_test$output)
+test3<-prediction(pred.knn[,2], dt_test$output)
+test4<-prediction(pred.rf[,2], dt_test$output)
+test5<-prediction(pred.lda[,2], dt_test$output)
+test6<-prediction(pred.qda[,2], dt_test$output)
+test7<-prediction(pred.mda[,2], dt_test$output)
+test8<-prediction(pred.gbm[,2], dt_test$output)
+
+perf<- performance(test1, "tpr","fpr")
+perf2<- performance(test2, "tpr","fpr")
+perf3<- performance(test3, "tpr","fpr")
+perf4<- performance(test4, "tpr","fpr")
+perf5<- performance(test5, "tpr","fpr")
+perf6<- performance(test6, "tpr","fpr")
+perf7<- performance(test7, "tpr","fpr")
+perf8<- performance(test8, "tpr","fpr")
+
+plot(perf, col="blue")
+plot(perf2, add=TRUE, col="green")
+plot(perf3, add=TRUE, col="red")
+plot(perf4, add=TRUE, col="orange")
+plot(perf5, add=TRUE, col="pink")
+plot(perf6, add=TRUE, col="yellow")
+plot(perf7, add=TRUE, col="black")
+plot(perf8, add=TRUE, col="purple")
+
+legend("topright", legend=c("RPART","NB","KNN","RF"), col=c("blue","green","red","orange","pink","yellow","black","purple"))
+```
+
+# Podsumowanie
